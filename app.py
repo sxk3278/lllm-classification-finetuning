@@ -1,27 +1,67 @@
 
 import streamlit as st
-import joblib
 import pandas as pd
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 
-# --- 1. Resource Architecture: Load models at startup with caching ---
+# --- 1. Resource Architecture: Load and train models at startup with caching ---
 @st.cache_resource
-def load_models():
+def load_and_train_models():
     try:
-        model = joblib.load('preference_model.pkl')
-        vectorizer = joblib.load('tfidf_vectorizer.pkl')
+        # Load 'mini_train.csv'
+        train_df = pd.read_csv('mini_train.csv')
+
+        # Handle missing values for text columns
+        text_columns = ["prompt", "response_a", "response_b"]
+        for col in text_columns:
+            train_df[col] = train_df[col].fillna("")
+
+        # Combine prompt + responses into one text feature
+        train_df["text"] = (
+            train_df["prompt"]
+            + " [A] "
+            + train_df["response_a"]
+            + " [B] "
+            + train_df["response_b"]
+        )
+
+        # Convert target columns into one integer label
+        target_columns = ["winner_model_a", "winner_model_b", "winner_tie"]
+        train_df["target"] = train_df[target_columns].values.argmax(axis=1)
+
+        # Fit a TfidfVectorizer
+        vectorizer = TfidfVectorizer(
+            ngram_range=(1, 2),
+            max_features=10000,
+            stop_words="english"
+        )
+        X_tfidf = vectorizer.fit_transform(train_df["text"])
+
+        # Fit a LogisticRegression classifier
+        model = LogisticRegression(
+            multi_class="multinomial",
+            solver="lbfgs",
+            max_iter=1000,
+            random_state=42
+        )
+        model.fit(X_tfidf, train_df["target"])
+
         return model, vectorizer
     except FileNotFoundError:
-        st.error("Error: Model or vectorizer files not found. Please ensure 'preference_model.pkl' and 'tfidf_vectorizer.pkl' are in the same directory as this app.")
+        st.error("Error: 'mini_train.csv' not found. Please ensure 'mini_train.csv' is in the same directory as this app.")
+        st.stop()
+    except Exception as e:
+        st.error(f"An unexpected error occurred during model setup: {e}")
         st.stop()
 
-model, vectorizer = load_models()
+model, vectorizer = load_and_train_models()
 
 # --- 2. Product Interface Design ---
 st.set_page_config(layout="wide", page_title="AI Product PM Sandbox")
 
 st.title("🤖 AI Product PM Sandbox: Human Alignment Predictor")
-st.markdown("This system utilizes an optimized gradient-boosted decision tree pipeline (LightGBM) trained on 57,000 real human evaluator records to benchmark model alignment and predict user satisfaction.")
+st.markdown("This system utilizes an optimized **Logistic Regression** pipeline trained on a small sample of human evaluator records to benchmark model alignment and predict user satisfaction.")
 st.markdown("--- ")
 
 # --- 3. Interactive Input Panel ---
@@ -56,7 +96,7 @@ if st.button("⚡ Predict Human Preference Alignment"):
         # Transform this string using the loaded vectorizer
         input_tfidf = vectorizer.transform([input_text])
 
-        # Call predict_proba() on the LightGBM model
+        # Call predict_proba() on the LogisticRegression model
         probabilities = model.predict_proba(input_tfidf)[0]
 
         # Extract the 3 output probabilities
