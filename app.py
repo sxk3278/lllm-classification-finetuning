@@ -40,7 +40,6 @@ def load_and_train_models():
 
         # Fit a LogisticRegression classifier
         model = LogisticRegression(
-            multi_class="multinomial",
             solver="lbfgs",
             max_iter=1000,
             random_state=42
